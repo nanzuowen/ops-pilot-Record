@@ -1,7 +1,6 @@
 package com.example.opspilot.controller;
 
 import com.example.opspilot.service.ChatService;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
