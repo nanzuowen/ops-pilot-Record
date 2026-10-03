@@ -142,3 +142,48 @@ Human Approve / Reject
   ↓
 Approve → Execute Tool → Resume Agent Loop
 Reject  → Do Not Execute
+
+### V5 - MCP ✅
+
+在现有 Agent Loop 基础上接入 MCP，使 Agent 可以同时调用本地 Tool 和外部 MCP Tool。
+
+新增：
+
+- 新建独立 `mcp-server` Spring Boot 服务
+- 使用 Streamable HTTP 暴露 MCP Server
+- 新增 `getTrace` MCP Tool
+- OpsPilot 接入 Spring AI MCP Client
+- 使用 `SyncMcpToolCallbackProvider` 获取 MCP Tool
+- 将 Local Tool 和 MCP Tool 统一转换为 `ToolCallback`
+- 将 MCP Tool 接入现有手写 Agent Loop
+- DeepSeek 可自主决定是否调用 `getTrace`
+- 支持 Metrics + Logs + Trace + Runbook 联合诊断
+- 保留 restartService Human-in-the-loop 审批机制
+
+核心流程：
+
+User
+↓
+DeepSeek
+↓
+Agent Loop
+↓
+Local Tool / MCP Tool
+↓
+Tool Result
+↓
+DeepSeek 再次推理
+↓
+最终诊断
+
+MCP 调用链：
+
+OpsPilot :8082
+↓
+MCP Client
+↓
+Streamable HTTP
+↓
+MCP Server :8083
+↓
+getTrace
