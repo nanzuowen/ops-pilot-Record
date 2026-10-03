@@ -17,14 +17,31 @@ public class ChatController {
 
     @PostMapping
     public ChatResponse chat(@RequestBody ChatRequest request){
-        String content = agentLoopService.chat(request.message());
+        String content = agentLoopService.chat(request.conversationId(),request.message());
         return new ChatResponse(content);
     }
 
-    public record ChatRequest(String message){
+    @PostMapping("/approve")
+    public ChatResponse approve(
+            @RequestBody ApprovalRequest request) {
+
+        String content = agentLoopService.approve(
+                request.conversationId(),
+                request.approved()
+        );
+
+        return new ChatResponse(content);
+    }
+
+    public record ChatRequest(String conversationId, String message){
 
     }
     public record ChatResponse(String content){
 
+    }
+    public record ApprovalRequest(
+            String conversationId,
+            boolean approved
+    ) {
     }
 }

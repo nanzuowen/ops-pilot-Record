@@ -1,5 +1,6 @@
 package com.example.opspilot.service;
 
+import com.example.opspilot.tool.RestartServiceTool;
 import com.example.opspilot.tool.SearchLogsTool;
 import com.example.opspilot.tool.SearchRunbookTool;
 import com.example.opspilot.tool.ServiceMetricsTool;
@@ -7,6 +8,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.AdvisorParams;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.ChatClientResponse;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
@@ -17,7 +21,10 @@ import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
@@ -30,15 +37,22 @@ public class AgentLoopService {
     private final ServiceMetricsTool serviceMetricsTool;
     private final SearchLogsTool searchLogsTool;
     private final SearchRunbookTool searchRunbookTool;
+    private final RestartServiceTool restartServiceTool;
 
     private final ToolCallingManager toolCallingManager =
             ToolCallingManager.builder().build();
+
+    private final ChatMemory chatMemory;
+
+    private final Map<String,PendingApproval> pendingApprovals = new ConcurrentHashMap<>();
 
     public AgentLoopService(
             ChatClient.Builder chatClientBuilder,
             ServiceMetricsTool serviceMetricsTool,
             SearchLogsTool searchLogsTool,
-            SearchRunbookTool searchRunbookTool) {
+            SearchRunbookTool searchRunbookTool,
+            RestartServiceTool restartServiceTool,
+            ChatMemory chatMemory) {
 
         this.chatClient = chatClientBuilder
                 .defaultSystem("""
@@ -65,32 +79,61 @@ public class AgentLoopService {
                            - 故障类型
                            - 判断依据
                            - 建议处理方式
+                        6. restartService 属于有副作用操作，只有用户明确要求重启时才允许请求该 Tool。
+                        7. 在 restartService 真正返回成功结果之前，不得声称服务已经重启。
+                           
+                        - restartService is a destructive operation.
+                        - You may request restartService only when the user explicitly asks to restart a service.
+                        - Never claim that a service was restarted unless the restartService tool actually returned a successful result.
                         """)
                 .build();
         this.serviceMetricsTool = serviceMetricsTool;
         this.searchLogsTool = searchLogsTool;
         this.searchRunbookTool = searchRunbookTool;
+        this.chatMemory = chatMemory;
+        this.restartServiceTool = restartServiceTool;
     }
 
-    public String chat(String message) {
+    public String chat(String conversationId, String message) {
+
+        if (conversationId == null || conversationId.isBlank()) {
+            throw new IllegalArgumentException("conversationId 不能为空");
+        }
+
+        if (pendingApprovals.containsKey(conversationId)) {
+            return """
+            当前会话存在待确认操作。
+            请先完成 restartService 的人工审批。
+            """;
+        }
 
         // 1. 把 @Tool 方法转换成 ToolCallback
-        ToolCallback[] tools = ToolCallbacks.from(serviceMetricsTool,searchLogsTool,searchRunbookTool);
+        ToolCallback[] tools = ToolCallbacks.from(serviceMetricsTool,searchLogsTool,searchRunbookTool,restartServiceTool);
 
         // 2. 告诉模型本轮可以使用哪些 Tool
         ChatOptions chatOptions = ToolCallingChatOptions.builder()
                 .toolCallbacks(tools)
                 .build();
 
+
+        //读取之前的Chat Memory
+        List<Message> conversationMessages = new ArrayList<>(chatMemory.get(conversationId));
+
+        //记录本轮开始前有多少历史信息
+        int memorySizeBeforeCurrentTurn = conversationMessages.size();
+
+        //加入当前用户信息
+        conversationMessages.add(new UserMessage(message));
+
         // ToolCallingManager 执行 Tool 时需要当前 Prompt
         Prompt prompt = new Prompt(
-                List.of(new UserMessage(message)),
+                conversationMessages,
                 chatOptions
         );
 
         // 3. 第一次调用 LLM
         ChatClientResponse response = chatClient.prompt()
-                .user(message)
+                .messages(conversationMessages)
 
                 // Spring AI 2.0.1 的 options() 接收 Builder
                 .options(chatOptions.mutate())
@@ -102,10 +145,26 @@ public class AgentLoopService {
                 )
                 .call()
                 .chatClientResponse();
+        return continueLoop(
+                conversationId,
+                message,
+                memorySizeBeforeCurrentTurn,
+                chatOptions,
+                prompt,
+                response,
+                0
+        );
+    }
 
-        int step = 0;
+    private String continueLoop(
+            String conversationId,
+            String userMessage,
+            int memorySizeBeforeCurrentTurn,
+            ChatOptions chatOptions,
+            Prompt prompt,
+            ChatClientResponse response,
+            int step) {
 
-        // 4. Agent Loop
         while (response.chatResponse() != null
                 && response.chatResponse().hasToolCalls()) {
 
@@ -117,35 +176,61 @@ public class AgentLoopService {
                 );
             }
 
+            var toolCalls = response.chatResponse()
+                    .getResult()
+                    .getOutput()
+                    .getToolCalls();
+
             log.info(
                     "[AgentLoop] step={}, toolCalls={}",
                     step,
-                    response.chatResponse()
-                            .getResult()
-                            .getOutput()
-                            .getToolCalls()
+                    toolCalls
             );
 
-            // 5. 执行模型请求的 Tool
+            boolean requiresApproval = toolCalls.stream()
+                    .anyMatch(toolCall ->
+                            "restartService".equals(toolCall.name())
+                    );
+
+            if (requiresApproval) {
+
+                log.warn(
+                        "[AgentLoop] approval required, toolCalls={}",
+                        toolCalls
+                );
+
+                pendingApprovals.put(
+                        conversationId,
+                        new PendingApproval(
+                                userMessage,
+                                prompt,
+                                response.chatResponse(),
+                                chatOptions,
+                                memorySizeBeforeCurrentTurn,
+                                step
+                        )
+                );
+
+                return """
+                    需要人工确认：Agent 请求执行 restartService。
+                    请确认是否允许执行该操作。
+                    """;
+            }
+
             ToolExecutionResult toolResult =
                     toolCallingManager.executeToolCalls(
                             prompt,
                             response.chatResponse()
                     );
 
-            // Tool result + 历史消息组成下一轮 Prompt
             prompt = new Prompt(
                     toolResult.conversationHistory(),
                     chatOptions
             );
 
-            // 6. 把 Tool Result 再交给 LLM
             response = chatClient.prompt()
                     .messages(toolResult.conversationHistory())
-
-                    // 同样需要 Builder
                     .options(chatOptions.mutate())
-
                     .advisors(
                             AdvisorParams.toolCallingAdvisorAutoRegister(false)
                     )
@@ -153,7 +238,6 @@ public class AgentLoopService {
                     .chatClientResponse();
         }
 
-        // 7. LLM 不再请求 Tool，Agent Loop 结束
         if (response.chatResponse() == null
                 || response.chatResponse().getResult() == null) {
 
@@ -162,9 +246,139 @@ public class AgentLoopService {
 
         log.info("[AgentLoop] finished, steps={}", step);
 
-        return response.chatResponse()
+        String finalAnswer = response.chatResponse()
                 .getResult()
                 .getOutput()
                 .getText();
+
+        List<Message> currentTurnMessages =
+                new ArrayList<>(
+                        prompt.getInstructions().subList(
+                                memorySizeBeforeCurrentTurn,
+                                prompt.getInstructions().size()
+                        )
+                );
+
+        currentTurnMessages.add(
+                new AssistantMessage(finalAnswer)
+        );
+
+        chatMemory.add(
+                conversationId,
+                currentTurnMessages
+        );
+
+        return finalAnswer;
     }
+
+    public String approve(
+            String conversationId,
+            boolean approved) {
+
+        PendingApproval pending =
+                pendingApprovals.remove(conversationId);
+
+        if (pending == null) {
+            throw new IllegalStateException(
+                    "当前会话没有待审批操作"
+            );
+        }
+
+        // ==============================
+        // 人工拒绝
+        // ==============================
+
+        if (!approved) {
+
+            String answer =
+                    "已拒绝执行 restartService，服务未重启。";
+
+            List<Message> currentTurnMessages =
+                    new ArrayList<>(
+                            pending.prompt()
+                                    .getInstructions()
+                                    .subList(
+                                            pending.memorySizeBeforeCurrentTurn(),
+                                            pending.prompt()
+                                                    .getInstructions()
+                                                    .size()
+                                    )
+                    );
+
+            currentTurnMessages.add(
+                    new AssistantMessage(answer)
+            );
+
+            chatMemory.add(
+                    conversationId,
+                    currentTurnMessages
+            );
+
+            log.info(
+                    "[HITL] rejected, conversationId={}",
+                    conversationId
+            );
+
+            return answer;
+        }
+
+
+        // ==============================
+        // 人工批准
+        // 到这里才真正执行 Tool
+        // ==============================
+
+        log.info(
+                "[HITL] approved, conversationId={}",
+                conversationId
+        );
+
+        ToolExecutionResult toolResult =
+                toolCallingManager.executeToolCalls(
+                        pending.prompt(),
+                        pending.chatResponse()
+                );
+
+        Prompt prompt = new Prompt(
+                toolResult.conversationHistory(),
+                pending.chatOptions()
+        );
+
+        // restartService 的执行结果重新交给 LLM
+        ChatClientResponse response = chatClient.prompt()
+                .messages(toolResult.conversationHistory())
+                .options(
+                        pending.chatOptions().mutate()
+                )
+                .advisors(
+                        AdvisorParams
+                                .toolCallingAdvisorAutoRegister(false)
+                )
+                .call()
+                .chatClientResponse();
+
+        // 从暂停点继续 Agent Loop
+        return continueLoop(
+                conversationId,
+                pending.userMessage(),
+                pending.memorySizeBeforeCurrentTurn(),
+                pending.chatOptions(),
+                prompt,
+                response,
+                pending.step()
+        );
+    }
+
+    private record PendingApproval(
+            String userMessage,
+            Prompt prompt,
+            org.springframework.ai.chat.model.ChatResponse chatResponse,
+            ChatOptions chatOptions,
+            int memorySizeBeforeCurrentTurn,
+            int step
+    ){
+
+    }
+
+
 }
