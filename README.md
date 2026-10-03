@@ -20,6 +20,16 @@
 - V5：MCP
 - 最后：SSE Streaming + 简单 UI
 
+```text
+V0：会聊天
+↓
+V1：会使用工具
+↓
+V2：会循环使用工具完成任务
+↓
+V3：让 Agent 获得外部知识
+```
+
 ## 开发进度
 
 ### V0：DeepSeek 基础对话 ✅
@@ -50,3 +60,33 @@ Agent 可以根据用户问题自主判断是否需要调用工具：
 核心链路：
 
 User → LLM → Tool Call → Java Tool → Tool Result → LLM → Answer
+
+## V2 - Agent Loop ✅
+
+在 V1 Tool Calling 基础上，手动实现 Agent Loop。
+
+新增：
+
+- `AgentLoopService`
+- `searchLogs` Tool
+- `ToolCallingManager`
+- Tool Result 回填 Conversation History
+- `MAX_STEPS` 最大循环轮数保护
+
+核心流程：
+
+```text
+User
+  ↓
+LLM
+  ↓
+Tool Call
+  ↓
+Java Tool
+  ↓
+Tool Result
+  ↓
+LLM 再次推理
+  ↓
+继续调用 Tool / 输出最终答案
+```
