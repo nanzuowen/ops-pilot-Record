@@ -7,8 +7,10 @@ spring:
 
   ai:
     model:
-      embedding: none
+      chat: openai
+      embedding: ollama
 
+    # DeepSeek：负责 Chat / Tool Calling
     openai:
       base-url: https://api.deepseek.com
       api-key: ${DEEPSEEK_API_KEY}
@@ -16,3 +18,10 @@ spring:
       chat:
         model: deepseek-flash
         temperature: 0.2
+
+    # Ollama：只负责 Embedding
+    ollama:
+      base-url: http://localhost:11434
+
+      embedding:
+        model: nomic-embed-text
