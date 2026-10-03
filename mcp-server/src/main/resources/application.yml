@@ -1,0 +1,17 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: ops-pilot-mcp-server
+
+  ai:
+    mcp:
+      server:
+        name: ops-pilot-mcp-server
+        version: 1.0.0
+        type: SYNC
+        protocol: STREAMABLE
+
+        annotation-scanner:
+          enabled: true
