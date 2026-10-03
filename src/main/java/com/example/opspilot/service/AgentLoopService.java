@@ -14,6 +14,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.model.tool.ToolExecutionResult;
@@ -39,6 +40,8 @@ public class AgentLoopService {
     private final SearchRunbookTool searchRunbookTool;
     private final RestartServiceTool restartServiceTool;
 
+    private final SyncMcpToolCallbackProvider mcpToolCallbackProvider;
+
     private final ToolCallingManager toolCallingManager =
             ToolCallingManager.builder().build();
 
@@ -52,6 +55,7 @@ public class AgentLoopService {
             SearchLogsTool searchLogsTool,
             SearchRunbookTool searchRunbookTool,
             RestartServiceTool restartServiceTool,
+            SyncMcpToolCallbackProvider mcpToolCallbackProvider,
             ChatMemory chatMemory) {
 
         this.chatClient = chatClientBuilder
@@ -85,6 +89,11 @@ public class AgentLoopService {
                         - restartService is a destructive operation.
                         - You may request restartService only when the user explicitly asks to restart a service.
                         - Never claim that a service was restarted unless the restartService tool actually returned a successful result.
+                        
+                        1. 优先获取客观运行数据，例如 Metrics 和 Logs。
+                        2. 如果怀疑存在下游服务超时或跨服务慢调用，使用 getTrace 获取调用链证据。
+                        3. 根据已有故障现象搜索相关 Runbook，获取排查依据和处理建议。
+                        4. 不要仅凭 Runbook 直接判断故障，必须结合 Metrics、Logs、Trace 等实际证据。
                         """)
                 .build();
         this.serviceMetricsTool = serviceMetricsTool;
@@ -92,6 +101,7 @@ public class AgentLoopService {
         this.searchRunbookTool = searchRunbookTool;
         this.chatMemory = chatMemory;
         this.restartServiceTool = restartServiceTool;
+        this.mcpToolCallbackProvider = mcpToolCallbackProvider;
     }
 
     public String chat(String conversationId, String message) {
@@ -107,12 +117,28 @@ public class AgentLoopService {
             """;
         }
 
-        // 1. 把 @Tool 方法转换成 ToolCallback
-        ToolCallback[] tools = ToolCallbacks.from(serviceMetricsTool,searchLogsTool,searchRunbookTool,restartServiceTool);
+        // 1. 把 @Tool 方法转换成 ToolCallback  本地Tool
+        ToolCallback[] localTools = ToolCallbacks.from(serviceMetricsTool,searchLogsTool,searchRunbookTool,restartServiceTool);
+
+        //1.1 MCP Server 提供的远程Tool
+        ToolCallback[] mcpTools = mcpToolCallbackProvider.getToolCallbacks();
+
+        //1.2 合并 Local Tool + MCP Tool
+        List<ToolCallback> allTools = new ArrayList<>(localTools.length + mcpTools.length);
+
+        allTools.addAll(List.of(localTools));
+        allTools.addAll(List.of(mcpTools));
+
+        log.info(
+                "[AgentLoop] availableTools={}",
+                allTools.stream()
+                        .map(tool -> tool.getToolDefinition().name())
+                        .toList()
+        );
 
         // 2. 告诉模型本轮可以使用哪些 Tool
         ChatOptions chatOptions = ToolCallingChatOptions.builder()
-                .toolCallbacks(tools)
+                .toolCallbacks(allTools)
                 .build();
 
 

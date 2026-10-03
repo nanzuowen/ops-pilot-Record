@@ -9,6 +9,14 @@ spring:
     model:
       chat: openai
       embedding: ollama
+    mcp:
+      client:
+        type: SYNC
+        streamable-http:
+          connections:
+            ops-pilot-tools:
+              url: http://localhost:8083
+              endpoint: /mcp
 
     # DeepSeek：负责 Chat / Tool Calling
     openai:
