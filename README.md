@@ -20,7 +20,6 @@
 - V5：MCP
 - 最后：SSE Streaming + 简单 UI
 
-```text
 V0：会聊天
 ↓
 V1：会使用工具
@@ -28,7 +27,12 @@ V1：会使用工具
 V2：会循环使用工具完成任务
 ↓
 V3：让 Agent 获得外部知识
-```
+↓
+V4：让 Agent 记住上下文，并在关键操作前请求人工确认
+↓
+V5：让 Agent 通过 MCP 接入外部工具
+↓
+最后：让 Agent 流式输出，并提供简单 UI
 
 ## 开发进度
 
@@ -75,7 +79,6 @@ User → LLM → Tool Call → Java Tool → Tool Result → LLM → Answer
 
 核心流程：
 
-```text
 User
   ↓
 LLM
@@ -89,7 +92,7 @@ Tool Result
 LLM 再次推理
   ↓
 继续调用 Tool / 输出最终答案
-```
+
 
 ### V3 - RAG
 
@@ -103,3 +106,39 @@ LLM 再次推理
 - 基于向量相似度进行语义检索
 - 将 RAG 接入 Agent Loop
 - 实现 Metrics + Logs + Runbook 联合故障诊断
+
+### V4 - Memory + Human-in-the-loop ✅
+
+在 Agent Loop 基础上加入多轮会话记忆和高风险 Tool 人工审批。
+
+新增：
+
+- 接入 Spring AI ChatMemory
+- 使用 conversationId 隔离不同会话
+- 保存 User / Assistant / Tool Call / Tool Result 上下文
+- 支持跨轮次引用历史诊断结果和 Tool Evidence
+- 新增 restartService Tool
+- 对有副作用 Tool 增加 Human-in-the-loop 审批
+- 使用 PendingApproval 保存暂停时的 Agent 执行状态
+- 支持 approve / reject
+- 审批通过后恢复 Agent Loop 并继续执行
+- 拒绝审批时不执行危险 Tool
+
+核心流程：
+
+User
+  ↓
+LLM
+  ↓
+Tool Call
+  ↓
+Safe Tool ─────────────→ Execute
+  ↓
+restartService
+  ↓
+Approval Required
+  ↓
+Human Approve / Reject
+  ↓
+Approve → Execute Tool → Resume Agent Loop
+Reject  → Do Not Execute
