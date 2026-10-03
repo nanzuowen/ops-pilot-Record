@@ -90,3 +90,16 @@ LLM 再次推理
   ↓
 继续调用 Tool / 输出最终答案
 ```
+
+### V3 - RAG
+
+- 接入 Ollama Embedding
+- 使用 nomic-embed-text 生成文本向量
+- 使用 SimpleVectorStore 存储 Runbook
+- 添加 Redis 连接池耗尽 Runbook
+- 添加 MySQL 慢查询 Runbook
+- 添加下游服务超时 Runbook
+- 实现 searchRunbook Tool
+- 基于向量相似度进行语义检索
+- 将 RAG 接入 Agent Loop
+- 实现 Metrics + Logs + Runbook 联合故障诊断
