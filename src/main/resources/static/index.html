@@ -1,10 +1,1165 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpsPilot - 微服务智能故障诊断 Agent</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: Inter, "Microsoft YaHei", Arial, sans-serif;
+            background: #0b1120;
+            color: #e5e7eb;
+
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            height: 72px;
+            flex-shrink: 0;
+
+            padding: 0 28px;
+            border-bottom: 1px solid #1f2937;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #0f172a;
+        }
+
+        .title {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            color: #94a3b8;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        .badges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            padding: 5px 9px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #93c5fd;
+            border: 1px solid #1e3a5f;
+            background: #0c1c33;
+        }
+
+        main {
+            flex: 1;
+            min-height: 0;
+
+            display: grid;
+            grid-template-columns: 270px 1fr;
+
+            overflow: hidden;
+        }
+
+        aside {
+            min-height: 0;
+            overflow: hidden;
+
+            border-right: 1px solid #1f2937;
+            padding: 20px;
+            background: #0f172a;
+        }
+
+        .section-title {
+            color: #94a3b8;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .case-button {
+            width: 100%;
+            text-align: left;
+            border: 1px solid #334155;
+            background: #111827;
+            color: #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: 0.15s;
+        }
+
+        .case-button:hover {
+            border-color: #3b82f6;
+            background: #172033;
+        }
+
+        .case-button strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .case-button span {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .conversation-box {
+            margin-top: 24px;
+        }
+
+        .conversation-id {
+            width: 100%;
+            padding: 9px;
+            background: #111827;
+            color: #cbd5e1;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .new-session {
+            margin-top: 8px;
+            width: 100%;
+            padding: 8px;
+            background: transparent;
+            border: 1px solid #334155;
+            color: #94a3b8;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .chat-area {
+            min-width: 0;
+            min-height: 0;
+
+            display: flex;
+            flex-direction: column;
+
+            overflow: hidden;
+        }
+
+        #messages {
+            flex: 1;
+            min-height: 0;
+
+            overflow-y: auto;
+            overflow-x: hidden;
+
+            padding: 28px;
+        }
+
+        #messages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #messages::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #messages::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+
+        #messages::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        .message {
+            max-width: 900px;
+            margin: 0 auto 20px;
+        }
+
+        .message.user {
+            max-width: 900px;
+            margin: 0 auto 20px;
+
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+
+        .message.user .message-header {
+            width: fit-content;
+            min-width: 120px;
+
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .message.user .message-content {
+            width: fit-content;
+            max-width: 70%;
+
+            background: #172554;
+            border: 1px solid #1e3a8a;
+
+            border-radius: 14px;
+
+            padding: 12px 16px;
+
+            text-align: left;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            margin-bottom: 6px;
+        }
+
+        .message-role {
+            font-size: 12px;
+            color: #64748b;
+
+            /* 原来的 margin-bottom 可以删掉 */
+            margin-bottom: 0;
+        }
+
+        .copy-button {
+            border: none;
+            background: transparent;
+
+            color: #64748b;
+
+            padding: 3px 7px;
+            border-radius: 6px;
+
+            cursor: pointer;
+
+            font-size: 12px;
+
+            transition:
+                    color 0.15s,
+                    background 0.15s;
+        }
+
+        .copy-button:hover {
+            color: #e2e8f0;
+            background: #1e293b;
+        }
+
+        .message-content {
+            padding: 14px 16px;
+            border-radius: 10px;
+            white-space: pre-wrap;
+            line-height: 1.65;
+            word-break: break-word;
+        }
+
+        .user .message-content {
+            background: #172554;
+            border: 1px solid #1e3a8a;
+        }
+
+        .assistant .message-content {
+            background: #111827;
+            border: 1px solid #334155;
+        }
+
+        .system-message {
+            color: #94a3b8;
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .approval-panel {
+            display: none;
+            max-width: 900px;
+            margin: 0 auto 20px;
+            padding: 14px 16px;
+            border: 1px solid #92400e;
+            background: #291a0d;
+            border-radius: 10px;
+        }
+
+        .approval-title {
+            font-weight: 700;
+            color: #fbbf24;
+            margin-bottom: 10px;
+        }
+
+        .approval-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .approve {
+            background: #166534;
+        }
+
+        .reject {
+            background: #991b1b;
+        }
+
+        .approval-actions button {
+            border: none;
+            color: white;
+            padding: 8px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .input-panel {
+            flex-shrink: 0;
+
+            padding: 10px 28px 14px;
+            background: transparent;
+            border-top: none;
+        }
+
+        .input-wrapper {
+            max-width: 900px;
+            margin: 0 auto;
+
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+
+            padding: 8px 10px 8px 16px;
+
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 18px;
+
+            transition: border-color 0.15s;
+        }
+
+        .input-wrapper:focus-within {
+            border-color: #475569;
+        }
+
+        textarea {
+            flex: 1;
+            align-self: center;
+
+            resize: none;
+
+            height: 28px;
+            min-height: 28px;
+            max-height: 140px;
+
+            overflow-y: hidden;
+
+            border: none;
+            outline: none;
+
+            background: transparent;
+            color: #f1f5f9;
+
+            padding: 2px 2px;
+
+            font-family: inherit;
+            font-size: 17px;
+            line-height: 24px;
+        }
+
+        textarea::placeholder {
+            color: #64748b;
+        }
+
+        #sendButton {
+            flex-shrink: 0;
+
+            width: 40px;
+            height: 40px;
+
+            border: none;
+            border-radius: 12px;
+
+            background: #f1f5f9;
+            color: #0f172a;
+
+            cursor: pointer;
+
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        #sendButton:disabled {
+            background: #475569;
+            color: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        .status {
+            max-width: 860px;
+            margin: 5px auto 0;
+            padding: 0 4px;
+
+            font-size: 11px;
+            color: #475569;
+        }
+
+        @media (max-width: 800px) {
+
+            .message.user .message-content {
+                max-width: 85%;
+            }
+
+            main {
+                grid-template-columns: 1fr;
+            }
+
+            aside {
+                display: none;
+            }
+
+            header {
+                padding: 0 16px;
+            }
+
+            .badges {
+                display: none;
+            }
+        }
+    </style>
 </head>
+
 <body>
-$END$
+
+<header>
+    <div>
+        <div class="title">OpsPilot</div>
+        <div class="subtitle">微服务智能故障诊断 Agent</div>
+    </div>
+
+    <div class="badges">
+        <span class="badge">Spring AI</span>
+        <span class="badge">Agent Loop</span>
+        <span class="badge">RAG</span>
+        <span class="badge">MCP</span>
+        <span class="badge">HITL</span>
+        <span class="badge">SSE</span>
+    </div>
+</header>
+
+<main>
+
+    <aside>
+
+        <div class="section-title">
+            故障场景
+        </div>
+
+        <button class="case-button"
+                onclick="useCase('order-service 响应很慢，请帮我诊断是否存在 Redis 连接池耗尽问题。')">
+            <strong>Redis 连接池耗尽</strong>
+            <span>Metrics + Logs + Runbook</span>
+        </button>
+
+        <button class="case-button"
+                onclick="useCase('order-service 接口响应时间明显升高，请帮我诊断是否存在 MySQL 慢查询。')">
+            <strong>MySQL 慢查询</strong>
+            <span>Metrics + Logs + Runbook</span>
+        </button>
+
+        <button class="case-button"
+                onclick="useCase('order-service 调用下游服务经常超时，请结合 Trace 帮我诊断。')">
+            <strong>下游服务超时</strong>
+            <span>Metrics + Logs + MCP Trace</span>
+        </button>
+
+        <div class="conversation-box">
+
+            <div class="section-title">
+                Conversation ID
+            </div>
+
+            <input
+                    id="conversationId"
+                    class="conversation-id"
+                    readonly
+            >
+
+            <button
+                    class="new-session"
+                    onclick="newConversation()">
+                新建会话
+            </button>
+
+        </div>
+
+    </aside>
+
+    <section class="chat-area">
+
+        <div id="messages">
+
+            <div id="welcome" class="system-message">
+                选择左侧故障 Case，或直接输入问题开始诊断。
+            </div>
+
+            <div id="approvalPanel" class="approval-panel">
+
+                <div class="approval-title">
+                    ⚠ 需要人工确认
+                </div>
+
+                <div style="margin-bottom: 12px;">
+                    Agent 请求执行 restartService。
+                    该操作具有副作用，需要人工审批。
+                </div>
+
+                <div class="approval-actions">
+
+                    <button
+                            class="approve"
+                            onclick="approveRestart(true)">
+                        批准执行
+                    </button>
+
+                    <button
+                            class="reject"
+                            onclick="approveRestart(false)">
+                        拒绝
+                    </button>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        <div class="input-panel">
+
+            <div class="input-wrapper">
+
+                <textarea
+                        id="messageInput"
+                        placeholder="输入故障现象，例如：order-service 响应很慢..."
+                ></textarea>
+
+                <button
+                        id="sendButton"
+                        onclick="sendMessage()"
+                        title="发送">
+                    ↑
+                </button>
+
+            </div>
+
+            <div id="status" class="status">
+                Ready
+            </div>
+
+        </div>
+
+    </section>
+
+</main>
+
+<script>
+
+    const messages = document.getElementById("messages");
+    const input = document.getElementById("messageInput");
+
+    function autoResizeInput() {
+
+        // 先缩回最小高度，才能正确计算新的 scrollHeight
+        input.style.height = "28px";
+
+        const maxHeight = 140;
+
+        const newHeight = Math.min(
+            input.scrollHeight,
+            maxHeight
+        );
+
+        input.style.height =
+            newHeight + "px";
+
+        /*
+         * 达到最大高度后，
+         * textarea 内部出现滚动条
+         */
+        input.style.overflowY =
+            input.scrollHeight > maxHeight
+                ? "auto"
+                : "hidden";
+    }
+
+    input.addEventListener(
+        "input",
+        autoResizeInput
+    );
+
+    const sendButton = document.getElementById("sendButton");
+    const conversationInput =
+        document.getElementById("conversationId");
+
+    const approvalPanel =
+        document.getElementById("approvalPanel");
+
+    const statusElement =
+        document.getElementById("status");
+
+
+    // ==============================
+    // Conversation
+    // ==============================
+
+    function createConversationId() {
+
+        if (window.crypto && crypto.randomUUID) {
+            return "ops-" + crypto.randomUUID();
+        }
+
+        return "ops-" + Date.now();
+    }
+
+
+    function newConversation() {
+
+        conversationInput.value =
+            createConversationId();
+
+        messages.querySelectorAll(".message")
+            .forEach(element => element.remove());
+
+        approvalPanel.style.display = "none";
+
+        document.getElementById("welcome")
+            .style.display = "block";
+
+        statusElement.textContent = "Ready";
+    }
+
+
+    // ==============================
+    // Preset Cases
+    // ==============================
+
+    function useCase(text) {
+
+        input.value = text;
+        input.focus();
+    }
+
+
+    // ==============================
+    // Message UI
+    // ==============================
+
+    function addMessage(role, content = "") {
+
+        document.getElementById("welcome")
+            .style.display = "none";
+
+        const wrapper =
+            document.createElement("div");
+
+        wrapper.className =
+            "message " + role;
+
+
+        // ==============================
+        // Header
+        // ==============================
+
+        const header =
+            document.createElement("div");
+
+        header.className =
+            "message-header";
+
+
+        const roleElement =
+            document.createElement("div");
+
+        roleElement.className =
+            "message-role";
+
+        roleElement.textContent =
+            role === "user"
+                ? "You"
+                : "OpsPilot";
+
+
+        const copyButton =
+            document.createElement("button");
+
+        copyButton.className =
+            "copy-button";
+
+        copyButton.textContent = "⧉";
+        copyButton.title = "复制";
+
+
+        // ==============================
+        // Content
+        // ==============================
+
+        const contentElement =
+            document.createElement("div");
+
+        contentElement.className =
+            "message-content";
+
+        contentElement.textContent =
+            content;
+
+
+        // ==============================
+        // Copy
+        // ==============================
+
+        copyButton.onclick =
+            () => copyMessage(
+                contentElement,
+                copyButton
+            );
+
+
+        header.appendChild(
+            roleElement
+        );
+
+        header.appendChild(
+            copyButton
+        );
+
+        wrapper.appendChild(
+            header
+        );
+
+        wrapper.appendChild(
+            contentElement
+        );
+
+
+        messages.insertBefore(
+            wrapper,
+            approvalPanel
+        );
+
+
+        scrollToBottom();
+
+        return contentElement;
+    }
+
+    async function copyMessage(
+        contentElement,
+        button
+    ) {
+
+        const text =
+            contentElement.textContent;
+
+        if (!text) {
+            return;
+        }
+
+        try {
+
+            await navigator.clipboard
+                .writeText(text);
+
+            const oldText =
+                button.textContent;
+
+            button.textContent = "✓";
+
+            setTimeout(
+                () => {
+                    button.textContent =
+                        oldText;
+                },
+                1200
+            );
+
+        }
+        catch (error) {
+
+            console.error(
+                "复制失败",
+                error
+            );
+        }
+    }
+
+
+    function scrollToBottom() {
+
+        messages.scrollTop =
+            messages.scrollHeight;
+    }
+
+
+    // ==============================
+    // Streaming Chat
+    // ==============================
+
+    async function sendMessage() {
+
+        const message =
+            input.value.trim();
+
+        if (!message) {
+            return;
+        }
+
+        const conversationId =
+            conversationInput.value;
+
+        approvalPanel.style.display =
+            "none";
+
+        addMessage(
+            "user",
+            message
+        );
+
+        input.value = "";
+        autoResizeInput();
+
+        const assistantElement =
+            addMessage(
+                "assistant",
+                ""
+            );
+
+        sendButton.disabled = true;
+
+        statusElement.textContent =
+            "Agent 正在诊断...";
+
+        let fullText = "";
+
+        try {
+
+            const response =
+                await fetch(
+                    "/api/chat/stream",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json",
+                            "Accept":
+                                "text/event-stream"
+                        },
+
+                        body: JSON.stringify({
+                            conversationId:
+                            conversationId,
+                            message:
+                            message
+                        })
+                    }
+                );
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    "HTTP "
+                    + response.status
+                );
+            }
+
+
+            const reader =
+                response.body.getReader();
+
+            const decoder =
+                new TextDecoder("utf-8");
+
+            let buffer = "";
+
+
+            while (true) {
+
+                const {
+                    value,
+                    done
+                } = await reader.read();
+
+
+                if (done) {
+                    break;
+                }
+
+
+                buffer += decoder.decode(
+                    value,
+                    {
+                        stream: true
+                    }
+                );
+
+
+                /*
+                 * Spring SSE:
+                 *
+                 * data:xxx
+                 *
+                 * data:yyy
+                 *
+                 */
+                const events =
+                    buffer.split(/\r?\n\r?\n/);
+
+                buffer =
+                    events.pop() || "";
+
+
+                for (const event of events) {
+
+                    const text =
+                        parseSseEvent(event);
+
+                    if (!text) {
+                        continue;
+                    }
+
+                    fullText += text;
+
+                    assistantElement.textContent =
+                        fullText;
+
+                    scrollToBottom();
+                }
+            }
+
+
+            /*
+             * 极端情况下处理最后一个残留事件
+             */
+            if (buffer.trim()) {
+
+                const remaining =
+                    parseSseEvent(buffer);
+
+                if (remaining) {
+
+                    fullText += remaining;
+
+                    assistantElement.textContent =
+                        fullText;
+                }
+            }
+
+
+            detectApproval(fullText);
+
+            statusElement.textContent =
+                "诊断完成";
+
+        }
+        catch (error) {
+
+            console.error(error);
+
+            assistantElement.textContent +=
+                "\n\n[请求失败] "
+                + error.message;
+
+            statusElement.textContent =
+                "请求失败";
+        }
+        finally {
+
+            sendButton.disabled = false;
+
+            input.focus();
+
+            scrollToBottom();
+        }
+    }
+
+
+    // ==============================
+    // SSE Parser
+    // ==============================
+
+    function parseSseEvent(event) {
+
+        const lines =
+            event.split(/\r?\n/);
+
+        const dataLines = [];
+
+        for (const line of lines) {
+
+            if (line.startsWith("data:")) {
+
+                let data =
+                    line.substring(5);
+
+                if (data.startsWith(" ")) {
+                    data = data.substring(1);
+                }
+
+                dataLines.push(data);
+            }
+        }
+
+
+        /*
+         * 如果后端直接输出纯文本，
+         * 做一个兼容处理。
+         */
+        if (dataLines.length === 0) {
+
+            return event;
+        }
+
+
+        return dataLines.join("\n");
+    }
+
+
+    // ==============================
+    // Human-in-the-loop
+    // ==============================
+
+    function detectApproval(text) {
+
+        if (
+            text.includes("需要人工确认")
+            &&
+            text.includes("restartService")
+        ) {
+
+            approvalPanel.style.display =
+                "block";
+
+            statusElement.textContent =
+                "等待人工审批";
+
+            scrollToBottom();
+        }
+    }
+
+
+    async function approveRestart(approved) {
+
+        const conversationId =
+            conversationInput.value;
+
+        approvalPanel.style.display =
+            "none";
+
+        statusElement.textContent =
+            approved
+                ? "正在执行审批后的操作..."
+                : "正在拒绝操作...";
+
+
+        try {
+
+            const response =
+                await fetch(
+                    "/api/chat/approve",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            conversationId:
+                            conversationId,
+                            approved:
+                            approved
+                        })
+                    }
+                );
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    "HTTP "
+                    + response.status
+                );
+            }
+
+
+            const result =
+                await response.json();
+
+
+            addMessage(
+                "assistant",
+                result.content
+            );
+
+
+            statusElement.textContent =
+                approved
+                    ? "操作完成"
+                    : "操作已拒绝";
+
+        }
+        catch (error) {
+
+            console.error(error);
+
+            addMessage(
+                "assistant",
+                "[审批请求失败] "
+                + error.message
+            );
+
+            statusElement.textContent =
+                "审批失败";
+        }
+    }
+
+
+    // ==============================
+    // Keyboard
+    // ==============================
+
+    input.addEventListener(
+        "keydown",
+        function (event) {
+
+            if (
+                event.key === "Enter"
+                &&
+                !event.shiftKey
+            ) {
+
+                event.preventDefault();
+
+                sendMessage();
+            }
+        }
+    );
+
+
+    // ==============================
+    // Init
+    // ==============================
+
+    newConversation();
+
+</script>
+
 </body>
 </html>
