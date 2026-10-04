@@ -5,6 +5,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.MediaType;
+import reactor.core.publisher.Flux;
 
 @RestController
 @RequestMapping("/api/chat")
@@ -19,6 +21,11 @@ public class ChatController {
     public ChatResponse chat(@RequestBody ChatRequest request){
         String content = agentLoopService.chat(request.conversationId(),request.message());
         return new ChatResponse(content);
+    }
+
+    @PostMapping(value = "/stream",produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Flux<String> stream(@RequestBody ChatRequest request){
+        return agentLoopService.streamChat(request.conversationId(),request.message());
     }
 
     @PostMapping("/approve")

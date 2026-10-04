@@ -21,6 +21,13 @@ import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Service;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.MessageAggregator;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
+import reactor.core.scheduler.Schedulers;
+
+import java.util.concurrent.atomic.AtomicReference;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -182,6 +189,81 @@ public class AgentLoopService {
         );
     }
 
+    public Flux<String> streamChat(String conversationId, String message){
+        if (conversationId == null || conversationId.isBlank()){
+            return Flux.error(new IllegalArgumentException("conversationId 不能为空"));
+        }
+
+        if (pendingApprovals.containsKey(conversationId)){
+            return Flux.just("""
+                    当前会话存在待确认操作。
+                    请先完成 restartService 的人工审批。
+                    """);
+        }
+
+        //local Tools
+        ToolCallback[] localTools = ToolCallbacks.from(serviceMetricsTool, searchLogsTool, searchRunbookTool, restartServiceTool);
+
+        //MCP Tools
+        ToolCallback[] mcpTools = mcpToolCallbackProvider.getToolCallbacks();
+
+        List<ToolCallback> allTools = new ArrayList<>(localTools.length+mcpTools.length);
+
+        allTools.addAll(List.of(localTools));
+        allTools.addAll(List.of(mcpTools));
+
+        log.info(
+                "[AgentStream] availableTools={}",
+                allTools.stream()
+                        .map(tool -> tool.getToolDefinition().name())
+                        .toList()
+        );
+
+        ChatOptions chatOptions = ToolCallingChatOptions.builder()
+                .toolCallbacks(allTools)
+                .build();
+
+        //Chat Memory
+        List<Message> conversationMessages = new ArrayList<>(chatMemory.get(conversationId));
+
+        int memorySizeBeforeCurrentTurn = conversationMessages.size();
+
+        conversationMessages.add(new UserMessage(message));
+
+        Prompt prompt = new Prompt(conversationMessages,chatOptions);
+
+        /*
+         * 我们现有 Agent Loop 是同步、命令式结构。
+         *
+         * Flux.create 负责把结果逐段推给客户端，
+         * boundedElastic 负责避免 blockLast()
+         * 占用 Web 请求线程。
+         */
+        return Flux.create(
+                sink -> Schedulers.boundedElastic()
+                        .schedule(() -> {
+                            try{
+                                runStreamingLoop(
+                                        conversationId,
+                                        message,
+                                        memorySizeBeforeCurrentTurn,
+                                        chatOptions,
+                                        prompt,
+                                        sink
+                                );
+                            }
+                            catch (Exception e){
+                                log.error("[AgentStream] failed",e);
+
+                                sink.error(e);
+                            }
+                        }),
+
+                FluxSink.OverflowStrategy.BUFFER
+        );
+
+    }
+
     private String continueLoop(
             String conversationId,
             String userMessage,
@@ -295,6 +377,153 @@ public class AgentLoopService {
         );
 
         return finalAnswer;
+    }
+
+    private void runStreamingLoop(
+            String conversationId,
+            String userMessage,
+            int memorySizeBeforeCurrentTurn,
+            ChatOptions chatOptions,
+            Prompt initialPrompt,
+            FluxSink<String> sink){
+        Prompt prompt = initialPrompt;
+
+        int step = 0;
+
+        while(true){
+            AtomicReference<ChatResponse> aggregatedResponse =
+                    new AtomicReference<>();
+
+            new MessageAggregator()
+                    .aggregate(
+
+                            chatClient.prompt()
+                                    .messages(prompt.getInstructions())
+                                    .options(chatOptions.mutate())
+                                    .advisors(
+                                            AdvisorParams
+                                                    .toolCallingAdvisorAutoRegister(false)
+                                    )
+                                    .stream()
+                                    .chatResponse()
+                                    .doOnNext(
+                                            chunk ->
+                                                    emitTextChunk(
+                                                            chunk,
+                                                            sink
+                                                    )
+                                    ),
+
+                            aggregatedResponse::set
+                    )
+                    .blockLast();
+
+            ChatResponse response =
+                    aggregatedResponse.get();
+
+            if (response == null
+            || response.getResult() == null){
+                throw new IllegalStateException("LLM未返回有效结果");
+            }
+
+            /*
+             * 没有 Tool Call：
+             * Agent Loop 结束。
+             */
+            if (!response.hasToolCalls()){
+                String finalAnswer = response
+                        .getResult()
+                        .getOutput()
+                        .getText();
+
+                List<Message> currentTurnMessages = new ArrayList<>(
+                        prompt.getInstructions()
+                                .subList(
+                                        memorySizeBeforeCurrentTurn,
+                                        prompt.getInstructions().size()
+                                )
+                );
+
+                chatMemory.add(conversationId,currentTurnMessages);
+
+                log.info("[AgentStream] finished, step={}",step);
+
+                sink.complete();
+                return;
+            }
+
+            // Tool Calling
+            step++;
+
+            if (step > MAX_STEPS){
+                throw new IllegalStateException("Agent 超过最大执行轮数：" + MAX_STEPS);
+            }
+
+            var toolCalls = response
+                    .getResult()
+                    .getOutput()
+                    .getToolCalls();
+
+            log.info("[AgentStream] step={},toolCalls={}",
+                    step,
+                    toolCalls);
+
+            // Human-in-the-loop
+            boolean requiresApproval = toolCalls.stream()
+                    .anyMatch(toolCall -> "restartService".equals(toolCall.name()));
+
+            if (requiresApproval){
+                pendingApprovals.put(conversationId,
+                        new PendingApproval(
+                                userMessage,
+                                prompt,
+                                response,
+                                chatOptions,
+                                memorySizeBeforeCurrentTurn,
+                                step
+                        ));
+
+                sink.next("""
+                    需要人工确认：Agent 请求执行 restartService。
+                    请确认是否允许执行该操作。
+                    """);
+
+                sink.complete();
+
+                return;
+            }
+
+            //执行 Local / MCP Tool
+            ToolExecutionResult toolResult = toolCallingManager.executeToolCalls(prompt,response);
+
+            /*
+             * Tool Result 加回上下文，
+             * 进入下一轮 LLM。
+             */
+            prompt = new Prompt(
+                    toolResult.conversationHistory(),
+                    chatOptions
+            );
+        }
+    }
+
+    private void emitTextChunk(
+            ChatResponse chunk,
+            FluxSink<String> sink) {
+
+        if (chunk == null
+                || chunk.getResult() == null) {
+            return;
+        }
+
+        String text =
+                chunk.getResult()
+                        .getOutput()
+                        .getText();
+
+        if (text != null && !text.isEmpty()) {
+            sink.next(text);
+        }
     }
 
     public String approve(
