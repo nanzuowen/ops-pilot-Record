@@ -12,13 +12,15 @@
 
 ### 总计划
 
-- V0：DeepSeek基础对话
+### 总计划
+
+- V0：DeepSeek 基础对话
 - V1：Tool Calling
 - V2：Agent Loop
 - V3：RAG
 - V4：Memory + Human-in-the-loop
 - V5：MCP
-- 最后：SSE Streaming + 简单 UI
+- V6：SSE Streaming + 简单 UI
 
 V0：会聊天
 ↓
@@ -32,7 +34,7 @@ V4：让 Agent 记住上下文，并在关键操作前请求人工确认
 ↓
 V5：让 Agent 通过 MCP 接入外部工具
 ↓
-最后：让 Agent 流式输出，并提供简单 UI
+V6：让 Agent 流式输出，并提供可交互的故障诊断 UI
 
 ## 开发进度
 
@@ -45,6 +47,7 @@ V5：让 Agent 通过 MCP 接入外部工具
 - 配置 OpsPilot System Prompt
 - 实现 `POST /api/chat` 接口
 - 完成 Prompt → Spring AI → DeepSeek → Response 基础链路
+
 
 ## V1 - Tool Calling
 
@@ -64,6 +67,7 @@ Agent 可以根据用户问题自主判断是否需要调用工具：
 核心链路：
 
 User → LLM → Tool Call → Java Tool → Tool Result → LLM → Answer
+
 
 ## V2 - Agent Loop ✅
 
@@ -107,6 +111,7 @@ LLM 再次推理
 - 将 RAG 接入 Agent Loop
 - 实现 Metrics + Logs + Runbook 联合故障诊断
 
+
 ### V4 - Memory + Human-in-the-loop ✅
 
 在 Agent Loop 基础上加入多轮会话记忆和高风险 Tool 人工审批。
@@ -142,6 +147,7 @@ Human Approve / Reject
   ↓
 Approve → Execute Tool → Resume Agent Loop
 Reject  → Do Not Execute
+
 
 ### V5 - MCP ✅
 
@@ -187,3 +193,62 @@ Streamable HTTP
 MCP Server :8083
 ↓
 getTrace
+
+
+### V6 - SSE Streaming + 简单 UI ✅
+
+在现有 Agent Loop 基础上加入 SSE Streaming，使 Agent 的最终回答可以实时流式返回给客户端，并提供一个简单的故障诊断 Web UI。
+
+新增：
+
+- 接入 `spring-boot-starter-webflux`
+- 新增 `POST /api/chat/stream` SSE 接口
+- 使用 `Flux` 返回 LLM Streaming Response
+- 使用 `MessageAggregator` 聚合流式 `ChatResponse`
+- 在 Streaming 模式下继续保留手写 Agent Loop
+- 支持 Streaming + Local Tool Calling
+- 支持 Streaming + MCP Tool Calling
+- 支持 Streaming + RAG
+- 支持 Streaming + Chat Memory
+- 保留 `restartService` Human-in-the-loop 审批机制
+- 新增 `static/index.html` 简单诊断 UI
+- 支持对话内容实时流式显示
+- 支持 Redis / MySQL / 下游超时三个预设故障场景
+- 支持 restartService 批准 / 拒绝操作
+- 支持新建会话和 Conversation ID 隔离
+- 支持消息复制
+
+核心流程：
+
+User
+↓
+POST /api/chat/stream
+↓
+DeepSeek Streaming
+↓
+Agent Loop
+↓
+Local Tool / MCP Tool / RAG
+↓
+Tool Result
+↓
+DeepSeek 再次推理
+↓
+SSE Streaming
+↓
+Web UI
+
+
+
+### OpsPilot V0 ~ V6 已完成。
+
+项目已经覆盖一个 Java AI Agent 的主要学习链路：
+
+Prompt
+→ Tool Calling
+→ Agent Loop
+→ RAG
+→ Memory
+→ Human-in-the-loop
+→ MCP
+→ SSE Streaming
