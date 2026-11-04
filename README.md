@@ -184,7 +184,7 @@ DeepSeek 再次推理
 
 MCP 调用链：
 
-OpsPilot :8082
+OpsPilot :8084
 ↓
 MCP Client
 ↓

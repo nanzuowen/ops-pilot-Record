@@ -1,5 +1,5 @@
 server:
-  port: 8082
+  port: 8084
 
 spring:
   application:
@@ -23,8 +23,12 @@ spring:
       base-url: https://api.deepseek.com
       api-key: ${DEEPSEEK_API_KEY}
 
+      # LLM请求治理
+      timeout: 60s
+      max-retries: 0
+
       chat:
-        model: deepseek-flash
+        model: deepseek-v4-flash
         temperature: 0.2
 
     # Ollama：只负责 Embedding
